@@ -435,28 +435,29 @@ SITES = [
 # TELEGRAM БОТ
 # ============================================
 
+# ============================================
+# TELEGRAM БОТ (ИСПРАВЛЕННАЯ ВЕРСИЯ)
+# ============================================
+
 class NewsBot:
     def __init__(self, token, channel_id):
         self.token = token
         self.channel_id = channel_id
         self.collector = NewsCollector()
         
-        # Создаем Application с явными параметрами
-        builder = Application.builder()
-        builder.token(token)
-        builder.connect_rate_limit(30)  # Лимиты для избежания блокировки
-        builder.write_timeout(30)
-        builder.read_timeout(30)
-        builder.pool_timeout(30)
+        # Простое создание Application (без лишних параметров)
+        self.application = Application.builder().token(token).build()
         
-        self.application = builder.build()
+        # Настройка handlers
         self.setup_handlers()
+        
+        logger.info("✅ Бот инициализирован")
     
     def setup_handlers(self):
         """Настройка обработчиков команд"""
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CommandHandler("menu", self.show_menu))
-        self.application.add_handler(CallbackQueryHandler(self.button_handler))
+        self.application.add_handler(CallbackQueryHandler(self.button_handler, pattern="^(?!back_to_menu).*$"))
         self.application.add_handler(CallbackQueryHandler(self.back_to_menu, pattern="^back_to_menu$"))
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -705,10 +706,21 @@ class NewsBot:
     def run(self):
         """Запуск бота"""
         logger.info("🚀 Бот запускается...")
+        
+        # Удаляем webhook перед запуском polling
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # Удаляем вебхук, если есть
+        loop.run_until_complete(self.application.bot.delete_webhook(drop_pending_updates=True))
+        
+        # Запускаем бота
         self.application.run_polling(
             poll_interval=1.0,
             timeout=30,
-            drop_pending_updates=True
+            drop_pending_updates=True,
+            allowed_updates=['message', 'callback_query']
         )
 
 # ============================================
