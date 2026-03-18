@@ -1,0 +1,27 @@
+# Секреты
+.env
+.env.local
+.env.production
+
+# Базы данных
+*.db
+*.db-journal
+/data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+docker-compose.override.yml
