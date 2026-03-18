@@ -25,7 +25,7 @@ class NewsCollector:
         self.init_database()
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
     
     def init_database(self):
@@ -101,213 +101,109 @@ class NewsCollector:
             return None
 
 # ============================================
-# ТОЧНЫЕ ПАРСЕРЫ
+# ПАРСЕРЫ
 # ============================================
 
 def parse_onliner(soup):
-    """Парсер Onliner.by"""
     news = []
     try:
         articles = soup.find_all('div', class_='news-tidings__item')
-        
-        if not articles:
-            articles = soup.find_all('div', class_='b-teasers-news-item')
-        
-        logger.info(f"Onliner: найдено блоков {len(articles)}")
-        
         for article in articles[:10]:
             title_elem = article.find('a', class_='news-tidings__link')
-            if not title_elem:
-                title_elem = article.find('a', class_='b-teasers-news-item__title')
-            
             if title_elem:
                 title = title_elem.text.strip()
                 url = title_elem.get('href')
-                
                 if url:
                     if url.startswith('/'):
                         url = 'https://people.onliner.by' + url
-                    
-                    news.append({
-                        'title': title,
-                        'url': url,
-                        'site': 'Onliner'
-                    })
-    except Exception as e:
-        logger.error(f"Ошибка Onliner: {e}")
-    
+                    news.append({'title': title, 'url': url, 'site': 'Onliner'})
+    except:
+        pass
     return news
 
 def parse_tochka(soup):
-    """Парсер Tochka.by"""
     news = []
     try:
         articles = soup.find_all('div', class_='news-item')
-        
-        if not articles:
-            articles = soup.find_all('article', class_='post-card')
-        
-        logger.info(f"Tochka: найдено блоков {len(articles)}")
-        
         for article in articles[:10]:
             title_elem = article.find('a', class_='news-item__title')
-            if not title_elem:
-                title_elem = article.find('a', class_='post-card__title')
-            
             if title_elem:
                 title = title_elem.text.strip()
                 url = title_elem.get('href')
-                
                 if url:
                     if url.startswith('/'):
                         url = 'https://tochka.by' + url
-                    
-                    news.append({
-                        'title': title,
-                        'url': url,
-                        'site': 'Tochka.by'
-                    })
-    except Exception as e:
-        logger.error(f"Ошибка Tochka: {e}")
-    
+                    news.append({'title': title, 'url': url, 'site': 'Tochka.by'})
+    except:
+        pass
     return news
 
 def parse_sb(soup):
-    """Парсер SB.by"""
     news = []
     try:
         articles = soup.find_all('div', class_='news-item')
-        
-        if not articles:
-            articles = soup.find_all('div', class_='b-news-list__item')
-        
-        logger.info(f"SB.by: найдено блоков {len(articles)}")
-        
         for article in articles[:10]:
             title_elem = article.find('a', class_='news-item__title')
-            if not title_elem:
-                title_elem = article.find('a', class_='b-news-list__link')
-            
             if title_elem:
                 title = title_elem.text.strip()
                 url = title_elem.get('href')
-                
                 if url:
                     if url.startswith('/'):
                         url = 'https://www.sb.by' + url
-                    
-                    news.append({
-                        'title': title,
-                        'url': url,
-                        'site': 'SB.by'
-                    })
-    except Exception as e:
-        logger.error(f"Ошибка SB.by: {e}")
-    
+                    news.append({'title': title, 'url': url, 'site': 'SB.by'})
+    except:
+        pass
     return news
 
 def parse_minsknews(soup):
-    """Парсер Minsknews.by"""
     news = []
     try:
         articles = soup.find_all('div', class_='news-item')
-        
-        if not articles:
-            articles = soup.find_all('article', class_='post')
-        
-        logger.info(f"Minsknews: найдено блоков {len(articles)}")
-        
         for article in articles[:10]:
             title_elem = article.find('a', class_='news-item__title')
-            if not title_elem:
-                title_elem = article.find('a', class_='post-title')
-            if not title_elem:
-                h3 = article.find('h3')
-                if h3:
-                    title_elem = h3.find('a')
-            
             if title_elem:
                 title = title_elem.text.strip()
                 url = title_elem.get('href')
-                
                 if url:
                     if url.startswith('/'):
                         url = 'https://minsknews.by' + url
-                    
-                    news.append({
-                        'title': title,
-                        'url': url,
-                        'site': 'Minsknews.by'
-                    })
-    except Exception as e:
-        logger.error(f"Ошибка Minsknews: {e}")
-    
+                    news.append({'title': title, 'url': url, 'site': 'Minsknews.by'})
+    except:
+        pass
     return news
 
 def parse_times(soup):
-    """Парсер Times.by (рабочий)"""
     news = []
     try:
         articles = soup.find_all('div', class_='post')
-        
-        logger.info(f"Times.by: найдено блоков {len(articles)}")
-        
         for article in articles[:10]:
             title_elem = article.find('a', class_='post-title')
-            if not title_elem:
-                h2 = article.find('h2')
-                if h2:
-                    title_elem = h2.find('a')
-            
             if title_elem:
                 title = title_elem.text.strip()
                 url = title_elem.get('href')
-                
                 if url:
                     if url.startswith('/'):
                         url = 'https://times.by' + url
-                    
-                    news.append({
-                        'title': title,
-                        'url': url,
-                        'site': 'Times.by'
-                    })
-    except Exception as e:
-        logger.error(f"Ошибка Times.by: {e}")
-    
+                    news.append({'title': title, 'url': url, 'site': 'Times.by'})
+    except:
+        pass
     return news
 
 def parse_mlyn(soup):
-    """Парсер Mlyn.by (рабочий)"""
     news = []
     try:
         articles = soup.find_all('div', class_='news-item')
-        
-        logger.info(f"Mlyn.by: найдено блоков {len(articles)}")
-        
         for article in articles[:10]:
             title_elem = article.find('a', class_='news-title')
-            if not title_elem:
-                h3 = article.find('h3')
-                if h3:
-                    title_elem = h3.find('a')
-            
             if title_elem:
                 title = title_elem.text.strip()
                 url = title_elem.get('href')
-                
                 if url:
                     if url.startswith('/'):
                         url = 'https://mlyn.by' + url
-                    
-                    news.append({
-                        'title': title,
-                        'url': url,
-                        'site': 'Mlyn.by'
-                    })
-    except Exception as e:
-        logger.error(f"Ошибка Mlyn.by: {e}")
-    
+                    news.append({'title': title, 'url': url, 'site': 'Mlyn.by'})
+    except:
+        pass
     return news
 
 # ============================================
@@ -332,9 +228,7 @@ class NewsBot:
         self.token = token
         self.channel_id = channel_id
         self.collector = NewsCollector()
-        self.application = Application.builder().token(token).build()
-        self.application.add_handler(CommandHandler("start", self.start_command))
-        self.application.add_handler(CallbackQueryHandler(self.button_handler))
+        self.application = None
         logger.info("✅ Бот инициализирован")
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -365,8 +259,6 @@ class NewsBot:
         elif query.data.startswith("site_"):
             site_id = query.data.replace("site_", "")
             await self.publish_site(query, context, site_id)
-        elif query.data == "menu":
-            await self.start_command(update, context)
     
     async def publish_site(self, query, context, site_id):
         site = next((s for s in SITES if s['id'] == site_id), None)
@@ -378,23 +270,13 @@ class NewsBot:
         news_list = self.collector.parse_site(site)
         
         if not news_list:
-            await query.edit_message_text(
-                f"❌ Не удалось получить новости с {site['name']}",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("◀️ В меню", callback_data="menu")
-                ]])
-            )
+            await query.edit_message_text(f"❌ Не удалось получить новости с {site['name']}")
             return
         
         new_news = [n for n in news_list if not self.collector.is_news_sent(n['url'])]
         
         if not new_news:
-            await query.edit_message_text(
-                f"📭 Нет новых новостей с {site['name']}",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("◀️ В меню", callback_data="menu")
-                ]])
-            )
+            await query.edit_message_text(f"📭 Нет новых новостей с {site['name']}")
             return
         
         await query.edit_message_text(f"📤 Публикую {len(new_news)} новостей...")
@@ -426,12 +308,7 @@ class NewsBot:
             except Exception as e:
                 logger.error(f"Ошибка: {e}")
         
-        await query.edit_message_text(
-            f"✅ Опубликовано {published} новостей с {site['name']}",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("◀️ В меню", callback_data="menu")
-            ]])
-        )
+        await query.edit_message_text(f"✅ Опубликовано {published} новостей с {site['name']}")
     
     async def publish_all(self, query, context):
         await query.edit_message_text("🔍 Собираю новости со всех сайтов...")
@@ -483,24 +360,28 @@ class NewsBot:
             total += site_published
         
         report = "📊 *Результаты*\n\n" + "\n".join(results) + f"\n\n✅ *Всего: {total}*"
-        
-        await query.edit_message_text(
-            report,
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("◀️ В меню", callback_data="menu")
-            ]])
-        )
+        await query.edit_message_text(report, parse_mode='Markdown')
     
-    def run(self):
+    async def run_bot(self):
+        """Запуск бота с правильным event loop"""
+        self.application = Application.builder().token(self.token).build()
+        self.application.add_handler(CommandHandler("start", self.start_command))
+        self.application.add_handler(CallbackQueryHandler(self.button_handler))
+        
         logger.info("🚀 Бот запускается...")
-        self.application.run_polling()
+        await self.application.initialize()
+        await self.application.start()
+        await self.application.updater.start_polling()
+        
+        # Бесконечное ожидание
+        while True:
+            await asyncio.sleep(3600)
 
 # ============================================
 # ЗАПУСК
 # ============================================
 
-def main():
+async def main():
     BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
     CHANNEL_ID = os.environ.get('TELEGRAM_CHANNEL_ID', '@parseranews')
     
@@ -508,12 +389,18 @@ def main():
         logger.error("❌ TELEGRAM_BOT_TOKEN не найден")
         sys.exit(1)
     
+    bot = NewsBot(BOT_TOKEN, CHANNEL_ID)
+    await bot.run_bot()
+
+if __name__ == "__main__":
     try:
-        bot = NewsBot(BOT_TOKEN, CHANNEL_ID)
-        bot.run()
+        # Создаем новый event loop для Python 3.14
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(main())
+        loop.run_forever()
+    except KeyboardInterrupt:
+        logger.info("🛑 Бот остановлен")
     except Exception as e:
         logger.error(f"❌ Критическая ошибка: {e}")
         sys.exit(1)
-
-if __name__ == "__main__":
-    main()
