@@ -555,24 +555,28 @@ class NewsBot:
         await query.edit_message_text(report, parse_mode='Markdown')
     
     async def run_bot(self):
-        """Запуск бота"""
-        # Сначала удаляем все вебхуки
-        app = Application.builder().token(self.token).build()
-        await app.bot.delete_webhook(drop_pending_updates=True)
-        
-        # Создаем новое приложение
-        self.application = Application.builder().token(self.token).build()
-        self.application.add_handler(CommandHandler("start", self.start_command))
-        self.application.add_handler(CallbackQueryHandler(self.button_handler))
-        
-        logger.info("🚀 Бот запускается...")
-        await self.application.initialize()
-        await self.application.start()
-        await self.application.updater.start_polling(drop_pending_updates=True)
-        
-        # Бесконечное ожидание
-        while True:
-            await asyncio.sleep(3600)
+    """Запуск бота"""
+    # Принудительно удаляем все вебхуки
+    temp_app = Application.builder().token(self.token).build()
+    await temp_app.bot.delete_webhook(drop_pending_updates=True)
+    logger.info("✅ Вебхуки удалены")
+    
+    # Небольшая пауза
+    await asyncio.sleep(1)
+    
+    # Создаем новое приложение
+    self.application = Application.builder().token(self.token).build()
+    self.application.add_handler(CommandHandler("start", self.start_command))
+    self.application.add_handler(CallbackQueryHandler(self.button_handler))
+    
+    logger.info("🚀 Бот запускается...")
+    await self.application.initialize()
+    await self.application.start()
+    await self.application.updater.start_polling(drop_pending_updates=True)
+    
+    # Бесконечное ожидание
+    while True:
+        await asyncio.sleep(3600)
 
 # ============================================
 # ЗАПУСК
