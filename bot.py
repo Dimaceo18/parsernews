@@ -12,7 +12,7 @@ import sys
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
-    format='%(astime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
@@ -104,19 +104,16 @@ class NewsCollector:
             return None
 
 # ============================================
-# ПРОВЕРЕННЫЕ ПАРСЕРЫ
+# ПАРСЕР ДЛЯ TIMES.BY (РАБОТАЕТ)
 # ============================================
 
 def parse_times(soup):
-    """Парсер Times.by - ПРОВЕРЕН"""
+    """Парсер Times.by - РАБОТАЕТ"""
     news = []
     try:
-        # Основной метод - ищем посты
         articles = soup.find_all('div', class_='post')
-        logger.info(f"Times.by: найдено постов {len(articles)}")
         
         for article in articles[:10]:
-            # Ищем заголовок
             title_elem = article.find('a', class_='post-title')
             if not title_elem:
                 title_elem = article.find('h2')
@@ -127,7 +124,7 @@ def parse_times(soup):
                 title = title_elem.text.strip()
                 url = title_elem.get('href')
                 
-                if url and title:
+                if url:
                     if url.startswith('/'):
                         url = 'https://times.by' + url
                     
@@ -136,42 +133,20 @@ def parse_times(soup):
                         'url': url,
                         'site': 'Times.by'
                     })
-                    logger.info(f"Times.by: нашел '{title[:30]}...'")
-        
-        # Если не нашли, ищем все ссылки с текстом
-        if not news:
-            for link in soup.find_all('a', href=True):
-                href = link.get('href', '')
-                text = link.text.strip()
-                
-                if (len(text) > 20 and 
-                    ('times.by' in href or href.startswith('/')) and
-                    not any(n['url'] == href for n in news)):
-                    
-                    if href.startswith('/'):
-                        href = 'https://times.by' + href
-                    
-                    news.append({
-                        'title': text,
-                        'url': href,
-                        'site': 'Times.by'
-                    })
-                    
-                    if len(news) >= 10:
-                        break
-        
     except Exception as e:
         logger.error(f"Ошибка Times.by: {e}")
     
-    return news[:10]
+    return news
+
+# ============================================
+# ПАРСЕР ДЛЯ MLYN.BY (РАБОТАЕТ)
+# ============================================
 
 def parse_mlyn(soup):
-    """Парсер Mlyn.by - ПРОВЕРЕН"""
+    """Парсер Mlyn.by - РАБОТАЕТ"""
     news = []
     try:
-        # Основной метод - ищем news-item
         articles = soup.find_all('div', class_='news-item')
-        logger.info(f"Mlyn.by: найдено news-item {len(articles)}")
         
         for article in articles[:10]:
             title_elem = article.find('a', class_='news-title')
@@ -184,7 +159,7 @@ def parse_mlyn(soup):
                 title = title_elem.text.strip()
                 url = title_elem.get('href')
                 
-                if url and title:
+                if url:
                     if url.startswith('/'):
                         url = 'https://mlyn.by' + url
                     
@@ -193,271 +168,228 @@ def parse_mlyn(soup):
                         'url': url,
                         'site': 'Mlyn.by'
                     })
-                    logger.info(f"Mlyn.by: нашел '{title[:30]}...'")
-        
-        # Резервный метод
-        if not news:
-            for link in soup.find_all('a', href=True):
-                href = link.get('href', '')
-                text = link.text.strip()
-                
-                if (len(text) > 20 and 
-                    ('mlyn.by' in href or href.startswith('/')) and
-                    not any(n['url'] == href for n in news)):
-                    
-                    if href.startswith('/'):
-                        href = 'https://mlyn.by' + href
-                    
-                    news.append({
-                        'title': text,
-                        'url': href,
-                        'site': 'Mlyn.by'
-                    })
-                    
-                    if len(news) >= 10:
-                        break
-        
     except Exception as e:
         logger.error(f"Ошибка Mlyn.by: {e}")
     
-    return news[:10]
+    return news
+
+# ============================================
+# ПАРСЕР ДЛЯ ONLINER.BY (ИСПРАВЛЕН)
+# ============================================
 
 def parse_onliner(soup):
-    """Парсер Onliner.by"""
+    """Парсер Onliner.by - ИСПРАВЛЕН"""
     news = []
     try:
-        # Ищем новости Onliner
-        articles = soup.find_all('div', class_='news-tidings__item')
-        
-        if not articles:
-            articles = soup.find_all('div', class_='b-teasers-news-item')
-        
-        logger.info(f"Onliner: найдено блоков {len(articles)}")
-        
-        for article in articles[:10]:
-            title_elem = article.find('a', class_='news-tidings__link')
-            if not title_elem:
-                title_elem = article.find('a', class_='b-teasers-news-item__title')
+        # Ищем все ссылки с новостями
+        for link in soup.find_all('a', href=True):
+            href = link.get('href', '')
+            text = link.text.strip()
             
-            if title_elem:
-                title = title_elem.text.strip()
-                url = title_elem.get('href')
+            # Проверяем, что это новость Onliner
+            if (len(text) > 20 and 
+                ('people.onliner.by' in href or '/news/' in href) and
+                not any(n['url'] == href for n in news)):
                 
-                if url:
-                    if url.startswith('/'):
-                        url = 'https://people.onliner.by' + url
-                    
-                    news.append({
-                        'title': title,
-                        'url': url,
-                        'site': 'Onliner'
-                    })
+                # Формируем полный URL
+                if href.startswith('/'):
+                    href = 'https://people.onliner.by' + href
+                elif not href.startswith('http'):
+                    href = 'https://people.onliner.by/' + href
+                
+                news.append({
+                    'title': text,
+                    'url': href,
+                    'site': 'Onliner'
+                })
+                
+                if len(news) >= 10:
+                    break
         
-        # Резервный поиск по ссылкам
+        # Если не нашли, пробуем найти по классам
         if not news:
-            for link in soup.find_all('a', href=True):
-                href = link.get('href', '')
-                text = link.text.strip()
-                
-                if (len(text) > 30 and 
-                    'onliner.by' in href and 
-                    '/news/' in href and
-                    not any(n['url'] == href for n in news)):
-                    
-                    if href.startswith('/'):
-                        href = 'https://people.onliner.by' + href
-                    
-                    news.append({
-                        'title': text,
-                        'url': href,
-                        'site': 'Onliner'
-                    })
-                    
-                    if len(news) >= 10:
-                        break
-                    
+            articles = soup.find_all('div', class_='news-tidings__item')
+            for article in articles[:10]:
+                title_elem = article.find('a')
+                if title_elem:
+                    title = title_elem.text.strip()
+                    url = title_elem.get('href')
+                    if url:
+                        if url.startswith('/'):
+                            url = 'https://people.onliner.by' + url
+                        news.append({
+                            'title': title,
+                            'url': url,
+                            'site': 'Onliner'
+                        })
+        
     except Exception as e:
         logger.error(f"Ошибка Onliner: {e}")
     
     return news[:10]
 
+# ============================================
+# ПАРСЕР ДЛЯ TOCHKA.BY (ИСПРАВЛЕН)
+# ============================================
+
 def parse_tochka(soup):
-    """Парсер Tochka.by"""
+    """Парсер Tochka.by - ИСПРАВЛЕН"""
     news = []
     try:
-        # Ищем статьи Tochka
-        articles = soup.find_all('div', class_='news-item')
-        
-        if not articles:
-            articles = soup.find_all('article', class_='post-card')
-        
-        logger.info(f"Tochka: найдено блоков {len(articles)}")
-        
-        for article in articles[:10]:
-            title_elem = article.find('a', class_='news-item__title')
-            if not title_elem:
-                title_elem = article.find('a', class_='post-card__title')
+        # Ищем все ссылки с новостями
+        for link in soup.find_all('a', href=True):
+            href = link.get('href', '')
+            text = link.text.strip()
             
-            if title_elem:
-                title = title_elem.text.strip()
-                url = title_elem.get('href')
+            # Проверяем, что это новость Tochka
+            if (len(text) > 20 and 
+                ('tochka.by' in href or '/news/' in href) and
+                not any(n['url'] == href for n in news)):
                 
-                if url:
-                    if url.startswith('/'):
-                        url = 'https://tochka.by' + url
-                    
-                    news.append({
-                        'title': title,
-                        'url': url,
-                        'site': 'Tochka.by'
-                    })
+                # Формируем полный URL
+                if href.startswith('/'):
+                    href = 'https://tochka.by' + href
+                elif not href.startswith('http'):
+                    href = 'https://tochka.by/' + href
+                
+                news.append({
+                    'title': text,
+                    'url': href,
+                    'site': 'Tochka.by'
+                })
+                
+                if len(news) >= 10:
+                    break
         
-        # Резервный поиск
+        # Если не нашли, пробуем найти по классам
         if not news:
-            for link in soup.find_all('a', href=True):
-                href = link.get('href', '')
-                text = link.text.strip()
-                
-                if (len(text) > 20 and 
-                    'tochka.by' in href and 
-                    '/news/' in href and
-                    not any(n['url'] == href for n in news)):
-                    
-                    if href.startswith('/'):
-                        href = 'https://tochka.by' + href
-                    
-                    news.append({
-                        'title': text,
-                        'url': href,
-                        'site': 'Tochka.by'
-                    })
-                    
-                    if len(news) >= 10:
-                        break
-                    
+            articles = soup.find_all('div', class_='news-item')
+            for article in articles[:10]:
+                title_elem = article.find('a')
+                if title_elem:
+                    title = title_elem.text.strip()
+                    url = title_elem.get('href')
+                    if url:
+                        if url.startswith('/'):
+                            url = 'https://tochka.by' + url
+                        news.append({
+                            'title': title,
+                            'url': url,
+                            'site': 'Tochka.by'
+                        })
+        
     except Exception as e:
         logger.error(f"Ошибка Tochka: {e}")
     
     return news[:10]
 
+# ============================================
+# ПАРСЕР ДЛЯ SB.BY (ИСПРАВЛЕН)
+# ============================================
+
 def parse_sb(soup):
-    """Парсер SB.by"""
+    """Парсер SB.by - ИСПРАВЛЕН"""
     news = []
     try:
-        # Ищем новости SB.by
-        articles = soup.find_all('div', class_='news-item')
-        
-        if not articles:
-            articles = soup.find_all('div', class_='b-news-list__item')
-        
-        logger.info(f"SB.by: найдено блоков {len(articles)}")
-        
-        for article in articles[:10]:
-            title_elem = article.find('a', class_='news-item__title')
-            if not title_elem:
-                title_elem = article.find('a', class_='b-news-list__link')
+        # Ищем все ссылки с новостями
+        for link in soup.find_all('a', href=True):
+            href = link.get('href', '')
+            text = link.text.strip()
             
-            if title_elem:
-                title = title_elem.text.strip()
-                url = title_elem.get('href')
+            # Проверяем, что это новость SB.by
+            if (len(text) > 20 and 
+                ('sb.by' in href or '/news/' in href) and
+                not any(n['url'] == href for n in news)):
                 
-                if url:
-                    if url.startswith('/'):
-                        url = 'https://www.sb.by' + url
-                    
-                    news.append({
-                        'title': title,
-                        'url': url,
-                        'site': 'SB.by'
-                    })
+                # Формируем полный URL
+                if href.startswith('/'):
+                    href = 'https://www.sb.by' + href
+                elif not href.startswith('http'):
+                    href = 'https://www.sb.by/' + href
+                
+                news.append({
+                    'title': text,
+                    'url': href,
+                    'site': 'SB.by'
+                })
+                
+                if len(news) >= 10:
+                    break
         
-        # Резервный поиск
+        # Если не нашли, пробуем найти по классам
         if not news:
-            for link in soup.find_all('a', href=True):
-                href = link.get('href', '')
-                text = link.text.strip()
-                
-                if (len(text) > 30 and 
-                    'sb.by' in href and 
-                    'news' in href and
-                    not any(n['url'] == href for n in news)):
-                    
-                    if href.startswith('/'):
-                        href = 'https://www.sb.by' + href
-                    
-                    news.append({
-                        'title': text,
-                        'url': href,
-                        'site': 'SB.by'
-                    })
-                    
-                    if len(news) >= 10:
-                        break
-                    
+            articles = soup.find_all('div', class_='news-item')
+            for article in articles[:10]:
+                title_elem = article.find('a')
+                if title_elem:
+                    title = title_elem.text.strip()
+                    url = title_elem.get('href')
+                    if url:
+                        if url.startswith('/'):
+                            url = 'https://www.sb.by' + url
+                        news.append({
+                            'title': title,
+                            'url': url,
+                            'site': 'SB.by'
+                        })
+        
     except Exception as e:
         logger.error(f"Ошибка SB.by: {e}")
     
     return news[:10]
 
+# ============================================
+# ПАРСЕР ДЛЯ MINSKNEWS.BY (ИСПРАВЛЕН)
+# ============================================
+
 def parse_minsknews(soup):
-    """Парсер Minsknews.by"""
+    """Парсер Minsknews.by - ИСПРАВЛЕН"""
     news = []
     try:
-        # Ищем новости Minsknews
-        articles = soup.find_all('div', class_='news-item')
-        
-        if not articles:
-            articles = soup.find_all('article', class_='post')
-        
-        logger.info(f"Minsknews: найдено блоков {len(articles)}")
-        
-        for article in articles[:10]:
-            title_elem = article.find('a', class_='news-item__title')
-            if not title_elem:
-                title_elem = article.find('a', class_='post-title')
-            if not title_elem:
-                h3 = article.find('h3')
-                if h3:
-                    title_elem = h3.find('a')
+        # Ищем все ссылки с новостями
+        for link in soup.find_all('a', href=True):
+            href = link.get('href', '')
+            text = link.text.strip()
             
-            if title_elem:
-                title = title_elem.text.strip()
-                url = title_elem.get('href')
+            # Проверяем, что это новость Minsknews
+            if (len(text) > 15 and 
+                'minsknews.by' in href and
+                not any(n['url'] == href for n in news)):
                 
-                if url:
-                    if url.startswith('/'):
-                        url = 'https://minsknews.by' + url
-                    
-                    news.append({
-                        'title': title,
-                        'url': url,
-                        'site': 'Minsknews.by'
-                    })
+                # Формируем полный URL
+                if href.startswith('/'):
+                    href = 'https://minsknews.by' + href
+                elif not href.startswith('http'):
+                    href = 'https://minsknews.by/' + href
+                
+                news.append({
+                    'title': text,
+                    'url': href,
+                    'site': 'Minsknews.by'
+                })
+                
+                if len(news) >= 10:
+                    break
         
-        # Резервный поиск
+        # Если не нашли, пробуем найти по классам
         if not news:
-            for link in soup.find_all('a', href=True):
-                href = link.get('href', '')
-                text = link.text.strip()
-                
-                if (len(text) > 20 and 
-                    'minsknews.by' in href and
-                    not any(n['url'] == href for n in news)):
-                    
-                    if href.startswith('/'):
-                        href = 'https://minsknews.by' + href
-                    elif not href.startswith('http'):
-                        href = 'https://minsknews.by/' + href
-                    
-                    news.append({
-                        'title': text,
-                        'url': href,
-                        'site': 'Minsknews.by'
-                    })
-                    
-                    if len(news) >= 10:
-                        break
-                    
+            articles = soup.find_all('div', class_='news-item')
+            for article in articles[:10]:
+                title_elem = article.find('a')
+                if title_elem:
+                    title = title_elem.text.strip()
+                    url = title_elem.get('href')
+                    if url:
+                        if url.startswith('/'):
+                            url = 'https://minsknews.by' + url
+                        elif not url.startswith('http'):
+                            url = 'https://minsknews.by/' + url
+                        news.append({
+                            'title': title,
+                            'url': url,
+                            'site': 'Minsknews.by'
+                        })
+        
     except Exception as e:
         logger.error(f"Ошибка Minsknews: {e}")
     
