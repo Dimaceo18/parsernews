@@ -2,10 +2,8 @@ import asyncio
 import logging
 import sqlite3
 import requests
-import re
-import xml.etree.ElementTree as ET
+import feedparser
 from datetime import datetime
-from bs4 import BeautifulSoup
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 import os
@@ -19,427 +17,234 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============================================
-# КЛАСС ДЛЯ РАБОТЫ С НОВОСТЯМИ
+# КЛАСС ДЛЯ РАБОТЫ С RSS (Telegram каналы)
 # ============================================
 
-class NewsCollector:
+class TelegramRSSCollector:
     def __init__(self):
         self.init_database()
+        self.rss_server = os.environ.get('RSS_SERVER', 'http://tg-to-rss:3042')
         self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        })
     
     def init_database(self):
+        """Инициализация базы данных для отслеживания отправленных постов"""
         try:
-            conn = sqlite3.connect('news.db')
+            conn = sqlite3.connect('/data/telegram_posts.db')
             c = conn.cursor()
-            c.execute('''CREATE TABLE IF NOT EXISTS sent_news
-                         (url TEXT PRIMARY KEY, 
-                          title TEXT, 
-                          site_name TEXT,
+            c.execute('''CREATE TABLE IF NOT EXISTS sent_posts
+                         (post_id TEXT PRIMARY KEY, 
+                          channel_name TEXT,
+                          title TEXT,
+                          url TEXT,
                           sent_date TEXT)''')
             conn.commit()
             conn.close()
-            logger.info("База данных инициализирована")
+            logger.info("✅ База данных инициализирована")
         except Exception as e:
-            logger.error(f"Ошибка инициализации БД: {e}")
+            logger.error(f"❌ Ошибка инициализации БД: {e}")
     
-    def is_news_sent(self, url):
+    def is_post_sent(self, post_id):
+        """Проверка, отправляли ли уже этот пост"""
         try:
-            conn = sqlite3.connect('news.db')
+            conn = sqlite3.connect('/data/telegram_posts.db')
             c = conn.cursor()
-            c.execute("SELECT url FROM sent_news WHERE url=?", (url,))
+            c.execute("SELECT post_id FROM sent_posts WHERE post_id=?", (post_id,))
             result = c.fetchone()
             conn.close()
             return result is not None
         except:
             return False
     
-    def mark_news_sent(self, url, title, site_name):
+    def mark_post_sent(self, post_id, channel_name, title, url):
+        """Отметить пост как отправленный"""
         try:
-            conn = sqlite3.connect('news.db')
+            conn = sqlite3.connect('/data/telegram_posts.db')
             c = conn.cursor()
             c.execute(
-                "INSERT OR IGNORE INTO sent_news (url, title, site_name, sent_date) VALUES (?, ?, ?, ?)",
-                (url, title, site_name, datetime.now().isoformat())
+                "INSERT OR IGNORE INTO sent_posts (post_id, channel_name, title, url, sent_date) VALUES (?, ?, ?, ?, ?)",
+                (post_id, channel_name, title, url, datetime.now().isoformat())
             )
             conn.commit()
             conn.close()
         except Exception as e:
-            logger.error(f"Ошибка сохранения в БД: {e}")
+            logger.error(f"❌ Ошибка сохранения в БД: {e}")
     
-    def parse_site(self, site_config):
+    def get_telegram_channels(self):
+        """Получить список доступных Telegram каналов из RSS сервера"""
         try:
-            logger.info(f"Парсинг {site_config['name']}...")
-            
-            response = self.session.get(
-                site_config['url'], 
-                timeout=15
-            )
-            response.encoding = 'utf-8'
-            
-            soup = BeautifulSoup(response.text, 'html.parser')
-            news_list = site_config['parser'](soup)
-            
-            logger.info(f"{site_config['name']}: найдено {len(news_list)} новостей")
-            return news_list
-            
-        except Exception as e:
-            logger.error(f"Ошибка {site_config['name']}: {e}")
+            response = self.session.get(f"{self.rss_server}/")
+            if response.status_code == 200:
+                # Здесь нужно парсить страницу со списком каналов
+                # Но проще - дать пользователю возможность добавлять вручную
+                return []
+        except:
             return []
     
-    def get_article_image(self, url):
+    def parse_telegram_rss(self, rss_url, channel_name):
+        """Парсинг RSS ленты Telegram канала"""
         try:
-            response = self.session.get(url, timeout=5)
-            soup = BeautifulSoup(response.text, 'html.parser')
+            logger.info(f"📡 Парсинг Telegram канала {channel_name}...")
             
-            og_image = soup.find('meta', property='og:image')
-            if og_image and og_image.get('content'):
-                return og_image['content']
+            feed = feedparser.parse(rss_url)
+            posts = []
             
-            return None
-        except:
-            return None
-
-# ============================================
-# ПАРСЕР ДЛЯ ONLINER.BY (РАБОЧИЙ ИЗ ДРУГОГО БОТА)
-# ============================================
-
-def parse_onliner(soup):
-    """Парсер Onliner.by - РАБОТАЕТ (через RSS)"""
-    news = []
-    try:
-        # Используем RSS фид напрямую
-        rss_url = "https://www.onliner.by/feed"
-        
-        response = requests.get(rss_url, timeout=15)
-        response.encoding = 'utf-8'
-        
-        # Парсим XML
-        root = ET.fromstring(response.text)
-        
-        # Ищем все элементы item
-        for item in root.findall(".//item")[:10]:
-            title = item.findtext("title", "").strip()
-            link = item.findtext("link", "").strip()
-            description = item.findtext("description", "").strip()
-            
-            # Очищаем описание от HTML
-            description = re.sub(r'<[^>]+>', '', description)
-            
-            # Ищем изображение
-            image = ""
-            # Пробуем найти enclosure
-            enc = item.find("enclosure")
-            if enc is not None and enc.get("url"):
-                image = enc.get("url")
-            
-            # Пробуем найти в description
-            if not image:
-                img_match = re.search(r'<img[^>]+src="([^">]+)"', description)
-                if img_match:
-                    image = img_match.group(1)
-            
-            if title and link:
-                news.append({
+            for entry in feed.entries[:10]:  # Берем последние 10 постов
+                # Создаем уникальный ID для поста
+                post_id = entry.get('id', entry.get('link', entry.title))
+                
+                # Извлекаем текст поста
+                title = entry.title
+                if 'summary' in entry:
+                    content = entry.summary
+                elif 'description' in entry:
+                    content = entry.description
+                else:
+                    content = title
+                
+                # Ищем изображение
+                image = None
+                if 'media_content' in entry:
+                    for media in entry.media_content:
+                        if media.get('medium') == 'image' or 'image' in media.get('type', ''):
+                            image = media.get('url')
+                            break
+                
+                if 'links' in entry:
+                    for link in entry.links:
+                        if link.get('type', '').startswith('image/'):
+                            image = link.get('href')
+                            break
+                
+                posts.append({
+                    'id': post_id,
                     'title': title,
-                    'url': link,
-                    'site': 'Onliner',
-                    'description': description[:200],
-                    'image': image
+                    'content': content[:500],  # Ограничиваем длину
+                    'url': entry.get('link', ''),
+                    'published': entry.get('published', datetime.now().isoformat()),
+                    'image': image,
+                    'channel': channel_name
                 })
-                
-        logger.info(f"Onliner: найдено {len(news)} новостей через RSS")
-        
-    except Exception as e:
-        logger.error(f"Ошибка Onliner: {e}")
-        # Если RSS не работает, пробуем старый метод
-        try:
-            for link in soup.find_all('a', href=True):
-                href = link.get('href', '')
-                text = link.text.strip()
-                if (len(text) > 30 and 
-                    ('onliner.by' in href or '/news/' in href) and
-                    not any(n['url'] == href for n in news)):
-                    
-                    if href.startswith('/'):
-                        href = 'https://people.onliner.by' + href
-                    
-                    news.append({
-                        'title': text,
-                        'url': href,
-                        'site': 'Onliner'
-                    })
-                    
-                    if len(news) >= 10:
-                        break
-        except:
-            pass
-    
-    return news[:10]
-
-# ============================================
-# ПАРСЕР ДЛЯ TIMES.BY (РАБОТАЕТ)
-# ============================================
-
-def parse_times(soup):
-    """Парсер Times.by - РАБОТАЕТ"""
-    news = []
-    try:
-        articles = soup.find_all('div', class_='post')
-        
-        for article in articles[:10]:
-            title_elem = article.find('a', class_='post-title')
-            if not title_elem:
-                title_elem = article.find('h2')
-                if title_elem:
-                    title_elem = title_elem.find('a')
             
-            if title_elem:
-                title = title_elem.text.strip()
-                url = title_elem.get('href')
-                
-                if url:
-                    if url.startswith('/'):
-                        url = 'https://times.by' + url
-                    
-                    if title and url and len(title) > 10:
-                        news.append({
-                            'title': title,
-                            'url': url,
-                            'site': 'Times.by'
-                        })
-    except Exception as e:
-        logger.error(f"Ошибка Times.by: {e}")
-    
-    return news
-
-# ============================================
-# ПАРСЕР ДЛЯ MLYN.BY (РАБОТАЕТ)
-# ============================================
-
-def parse_mlyn(soup):
-    """Парсер Mlyn.by - РАБОТАЕТ"""
-    news = []
-    try:
-        articles = soup.find_all('div', class_='news-item')
-        
-        for article in articles[:10]:
-            title_elem = article.find('a', class_='news-title')
-            if not title_elem:
-                title_elem = article.find('h3')
-                if title_elem:
-                    title_elem = title_elem.find('a')
+            logger.info(f"✅ {channel_name}: найдено {len(posts)} постов")
+            return posts
             
-            if title_elem:
-                title = title_elem.text.strip()
-                url = title_elem.get('href')
-                
-                if url:
-                    if url.startswith('/'):
-                        url = 'https://mlyn.by' + url
-                    
-                    if title and url and len(title) > 10:
-                        news.append({
-                            'title': title,
-                            'url': url,
-                            'site': 'Mlyn.by'
-                        })
-    except Exception as e:
-        logger.error(f"Ошибка Mlyn.by: {e}")
-    
-    return news
+        except Exception as e:
+            logger.error(f"❌ Ошибка парсинга {channel_name}: {e}")
+            return []
 
 # ============================================
-# ПАРСЕР ДЛЯ TOCHKA.BY (ОСТАВЛЯЕМ КАК ЕСТЬ)
+# КОНФИГУРАЦИЯ TELEGRAM КАНАЛОВ ДЛЯ ОТСЛЕЖИВАНИЯ
 # ============================================
 
-def parse_tochka(soup):
-    """Парсер Tochka.by"""
-    news = []
-    try:
-        articles = soup.find_all('div', class_='news-item')
-        
-        for article in articles[:10]:
-            title_elem = article.find('a', class_='news-item__title')
-            if not title_elem:
-                title_elem = article.find('a', class_='post-card__title')
-            
-            if title_elem:
-                title = title_elem.text.strip()
-                url = title_elem.get('href')
-                
-                if url:
-                    if url.startswith('/'):
-                        url = 'https://tochka.by' + url
-                    
-                    if title and url and len(title) > 10:
-                        news.append({
-                            'title': title,
-                            'url': url,
-                            'site': 'Tochka.by'
-                        })
-    except Exception as e:
-        logger.error(f"Ошибка Tochka: {e}")
-    
-    return news
+# Добавьте сюда URL RSS лент ваших Telegram каналов
+# Формат: http://tg-to-rss:3042/feed/ID_КАНАЛА
+# ID канала можно узнать после авторизации в telegram-to-rss
 
-# ============================================
-# ПАРСЕР ДЛЯ SB.BY (ОСТАВЛЯЕМ КАК ЕСТЬ)
-# ============================================
-
-def parse_sb(soup):
-    """Парсер SB.by"""
-    news = []
-    try:
-        articles = soup.find_all('div', class_='news-item')
-        
-        for article in articles[:10]:
-            title_elem = article.find('a', class_='news-item__title')
-            
-            if title_elem:
-                title = title_elem.text.strip()
-                url = title_elem.get('href')
-                
-                if url:
-                    if url.startswith('/'):
-                        url = 'https://www.sb.by' + url
-                    
-                    if title and url and len(title) > 10:
-                        news.append({
-                            'title': title,
-                            'url': url,
-                            'site': 'SB.by'
-                        })
-    except Exception as e:
-        logger.error(f"Ошибка SB.by: {e}")
-    
-    return news
-
-# ============================================
-# ПАРСЕР ДЛЯ MINSKNEWS.BY (ОСТАВЛЯЕМ КАК ЕСТЬ)
-# ============================================
-
-def parse_minsknews(soup):
-    """Парсер Minsknews.by"""
-    news = []
-    try:
-        articles = soup.find_all('div', class_='news-item')
-        
-        for article in articles[:10]:
-            title_elem = article.find('a', class_='news-item__title')
-            if not title_elem:
-                title_elem = article.find('a', class_='post-title')
-            if not title_elem:
-                h3 = article.find('h3')
-                if h3:
-                    title_elem = h3.find('a')
-            
-            if title_elem:
-                title = title_elem.text.strip()
-                url = title_elem.get('href')
-                
-                if url:
-                    if url.startswith('/'):
-                        url = 'https://minsknews.by' + url
-                    
-                    if title and url and len(title) > 10:
-                        news.append({
-                            'title': title,
-                            'url': url,
-                            'site': 'Minsknews.by'
-                        })
-    except Exception as e:
-        logger.error(f"Ошибка Minsknews: {e}")
-    
-    return news
-
-# ============================================
-# КОНФИГУРАЦИЯ САЙТОВ
-# ============================================
-
-SITES = [
-    {'id': 'times', 'name': 'Times.by', 'url': 'https://times.by/', 'parser': parse_times, 'button': '⏱ Times.by'},
-    {'id': 'mlyn', 'name': 'Mlyn.by', 'url': 'https://mlyn.by/', 'parser': parse_mlyn, 'button': '🌾 Mlyn.by'},
-    {'id': 'onliner', 'name': 'Onliner', 'url': 'https://people.onliner.by/news', 'parser': parse_onliner, 'button': '📱 Onliner'},
-    {'id': 'tochka', 'name': 'Tochka.by', 'url': 'https://tochka.by/news/', 'parser': parse_tochka, 'button': '📍 Tochka.by'},
-    {'id': 'sb', 'name': 'SB.by', 'url': 'https://www.sb.by/news.html', 'parser': parse_sb, 'button': '📰 SB.by'},
-    {'id': 'minsknews', 'name': 'Minsknews.by', 'url': 'https://minsknews.by/', 'parser': parse_minsknews, 'button': '🏙 Minsknews'},
+TELEGRAM_CHANNELS = [
+    {
+        'id': 'channel_1',
+        'name': 'Название канала 1',
+        'rss_url': 'http://tg-to-rss:3042/feed/123456789',  # Замените на реальный URL
+        'button': '📱 Канал 1'
+    },
+    {
+        'id': 'channel_2',
+        'name': 'Название канала 2',
+        'rss_url': 'http://tg-to-rss:3042/feed/987654321',  # Замените на реальный URL
+        'button': '📱 Канал 2'
+    },
 ]
 
 # ============================================
 # TELEGRAM БОТ
 # ============================================
 
-class NewsBot:
+class RSSForwardBot:
     def __init__(self, token, channel_id):
         self.token = token
         self.channel_id = channel_id
-        self.collector = NewsCollector()
+        self.collector = TelegramRSSCollector()
         self.application = None
         logger.info("✅ Бот инициализирован")
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик команды /start"""
         keyboard = []
-        keyboard.append([InlineKeyboardButton("📢 ВСЕ САЙТЫ", callback_data="all")])
         
-        for i in range(0, len(SITES), 2):
+        # Кнопка для всех каналов
+        keyboard.append([InlineKeyboardButton("📢 ВСЕ КАНАЛЫ", callback_data="all")])
+        
+        # Кнопки для каждого канала
+        for i in range(0, len(TELEGRAM_CHANNELS), 2):
             row = []
-            row.append(InlineKeyboardButton(SITES[i]['button'], callback_data=f"site_{SITES[i]['id']}"))
-            if i + 1 < len(SITES):
-                row.append(InlineKeyboardButton(SITES[i + 1]['button'], callback_data=f"site_{SITES[i + 1]['id']}"))
+            row.append(InlineKeyboardButton(
+                TELEGRAM_CHANNELS[i]['button'], 
+                callback_data=f"channel_{TELEGRAM_CHANNELS[i]['id']}"
+            ))
+            if i + 1 < len(TELEGRAM_CHANNELS):
+                row.append(InlineKeyboardButton(
+                    TELEGRAM_CHANNELS[i + 1]['button'], 
+                    callback_data=f"channel_{TELEGRAM_CHANNELS[i + 1]['id']}"
+                ))
             keyboard.append(row)
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(
-            "📬 *Новостной бот Беларуси*\n\nВыбери источник новостей:",
+            "📬 *Пересылка из Telegram каналов*\n\n"
+            "Выбери источник для пересылки в канал:",
             parse_mode='Markdown',
             reply_markup=reply_markup
         )
     
     async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик нажатий на кнопки"""
         query = update.callback_query
         await query.answer()
         
         if query.data == "all":
             await self.publish_all(query, context)
-        elif query.data.startswith("site_"):
-            site_id = query.data.replace("site_", "")
-            await self.publish_site(query, context, site_id)
+        elif query.data.startswith("channel_"):
+            channel_id = query.data.replace("channel_", "")
+            await self.publish_channel(query, context, channel_id)
     
-    async def publish_site(self, query, context, site_id):
-        site = next((s for s in SITES if s['id'] == site_id), None)
-        if not site:
+    async def publish_channel(self, query, context, channel_id):
+        """Публикация постов из одного канала"""
+        channel = next((c for c in TELEGRAM_CHANNELS if c['id'] == channel_id), None)
+        if not channel:
             return
         
-        await query.edit_message_text(f"🔍 Собираю новости с {site['name']}...")
+        await query.edit_message_text(f"🔍 Собираю посты из {channel['name']}...")
         
-        news_list = self.collector.parse_site(site)
+        posts = self.collector.parse_telegram_rss(channel['rss_url'], channel['name'])
         
-        if not news_list:
-            await query.edit_message_text(f"❌ Не удалось получить новости с {site['name']}")
+        if not posts:
+            await query.edit_message_text(f"❌ Не удалось получить посты из {channel['name']}")
             return
         
-        new_news = [n for n in news_list if not self.collector.is_news_sent(n['url'])]
+        # Фильтруем только новые посты
+        new_posts = [p for p in posts if not self.collector.is_post_sent(p['id'])]
         
-        if not new_news:
-            await query.edit_message_text(f"📭 Нет новых новостей с {site['name']}")
+        if not new_posts:
+            await query.edit_message_text(f"📭 Нет новых постов в {channel['name']}")
             return
         
-        await query.edit_message_text(f"📤 Публикую {len(new_news)} новостей...")
+        await query.edit_message_text(f"📤 Публикую {len(new_posts)} постов...")
         
         published = 0
-        for news in new_news:
+        for post in new_posts:
             try:
-                image_url = self.collector.get_article_image(news['url'])
-                text = f"*{news['title']}*\n\n[🔗 Читать на {news['site']}]({news['url']})"
+                # Формируем текст поста
+                text = f"*{post['title']}*\n\n"
+                text += f"{post['content']}\n\n"
+                if post['url']:
+                    text += f"[🔗 Ссылка на пост]({post['url']})"
                 
-                if image_url:
+                # Отправляем с картинкой или без
+                if post['image']:
                     await context.bot.send_photo(
                         chat_id=self.channel_id,
-                        photo=image_url,
+                        photo=post['image'],
                         caption=text,
                         parse_mode='Markdown'
                     )
@@ -450,44 +255,47 @@ class NewsBot:
                         parse_mode='Markdown'
                     )
                 
-                self.collector.mark_news_sent(news['url'], news['title'], news['site'])
+                self.collector.mark_post_sent(post['id'], channel['name'], post['title'], post['url'])
                 published += 1
-                await asyncio.sleep(2)
+                await asyncio.sleep(2)  # Пауза между постами
                 
             except Exception as e:
-                logger.error(f"Ошибка: {e}")
+                logger.error(f"❌ Ошибка отправки: {e}")
         
-        await query.edit_message_text(f"✅ Опубликовано {published} новостей с {site['name']}")
+        await query.edit_message_text(f"✅ Опубликовано {published} постов из {channel['name']}")
     
     async def publish_all(self, query, context):
-        await query.edit_message_text("🔍 Собираю новости со всех сайтов...")
+        """Публикация постов из всех каналов"""
+        await query.edit_message_text("🔍 Собираю посты из всех каналов...")
         
         total = 0
         results = []
         
-        for site in SITES:
-            news_list = self.collector.parse_site(site)
+        for channel in TELEGRAM_CHANNELS:
+            posts = self.collector.parse_telegram_rss(channel['rss_url'], channel['name'])
             
-            if not news_list:
-                results.append(f"❌ {site['name']}: 0")
+            if not posts:
+                results.append(f"❌ {channel['name']}: 0")
                 continue
             
-            new_news = [n for n in news_list if not self.collector.is_news_sent(n['url'])]
+            new_posts = [p for p in posts if not self.collector.is_post_sent(p['id'])]
             
-            if not new_news:
-                results.append(f"📭 {site['name']}: нет новых")
+            if not new_posts:
+                results.append(f"📭 {channel['name']}: нет новых")
                 continue
             
-            site_published = 0
-            for news in new_news:
+            channel_published = 0
+            for post in new_posts:
                 try:
-                    image_url = self.collector.get_article_image(news['url'])
-                    text = f"*{news['title']}*\n\n[🔗 Читать на {news['site']}]({news['url']})"
+                    text = f"*{post['title']}*\n\n"
+                    text += f"{post['content']}\n\n"
+                    if post['url']:
+                        text += f"[🔗 Ссылка на пост]({post['url']})"
                     
-                    if image_url:
+                    if post['image']:
                         await context.bot.send_photo(
                             chat_id=self.channel_id,
-                            photo=image_url,
+                            photo=post['image'],
                             caption=text,
                             parse_mode='Markdown'
                         )
@@ -498,30 +306,29 @@ class NewsBot:
                             parse_mode='Markdown'
                         )
                     
-                    self.collector.mark_news_sent(news['url'], news['title'], news['site'])
-                    site_published += 1
+                    self.collector.mark_post_sent(post['id'], channel['name'], post['title'], post['url'])
+                    channel_published += 1
                     await asyncio.sleep(2)
                     
                 except Exception as e:
-                    logger.error(f"Ошибка: {e}")
+                    logger.error(f"❌ Ошибка: {e}")
             
-            results.append(f"✅ {site['name']}: {site_published}")
-            total += site_published
+            results.append(f"✅ {channel['name']}: {channel_published}")
+            total += channel_published
         
         report = "📊 *Результаты*\n\n" + "\n".join(results) + f"\n\n✅ *Всего: {total}*"
         await query.edit_message_text(report, parse_mode='Markdown')
     
     async def run_bot(self):
         """Запуск бота"""
-        # Принудительно удаляем все вебхуки
+        # Удаляем вебхуки
         temp_app = Application.builder().token(self.token).build()
         await temp_app.bot.delete_webhook(drop_pending_updates=True)
         logger.info("✅ Вебхуки удалены")
         
-        # Небольшая пауза
         await asyncio.sleep(1)
         
-        # Создаем новое приложение
+        # Создаем основное приложение
         self.application = Application.builder().token(self.token).build()
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CallbackQueryHandler(self.button_handler))
@@ -541,22 +348,24 @@ class NewsBot:
 
 async def main():
     BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
-    CHANNEL_ID = os.environ.get('TELEGRAM_CHANNEL_ID', '@parseranews')
+    CHANNEL_ID = os.environ.get('TELEGRAM_CHANNEL_ID')
     
     if not BOT_TOKEN:
         logger.error("❌ TELEGRAM_BOT_TOKEN не найден")
         sys.exit(1)
     
-    bot = NewsBot(BOT_TOKEN, CHANNEL_ID)
+    if not CHANNEL_ID:
+        logger.error("❌ TELEGRAM_CHANNEL_ID не найден")
+        sys.exit(1)
+    
+    bot = RSSForwardBot(BOT_TOKEN, CHANNEL_ID)
     await bot.run_bot()
 
 if __name__ == "__main__":
     try:
-        # Создаем event loop для Python 3.14
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(main())
-        loop.run_forever()
     except KeyboardInterrupt:
         logger.info("🛑 Бот остановлен")
     except Exception as e:
