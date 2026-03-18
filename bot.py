@@ -23,12 +23,16 @@ logger = logging.getLogger(__name__)
 class NewsCollector:
     def __init__(self):
         self.init_database()
+        # Создаем сессию с таймаутами
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
         })
+        # Настраиваем таймауты
+        self.session.mount('https://', requests.adapters.HTTPAdapter(max_retries=2))
+        self.session.mount('http://', requests.adapters.HTTPAdapter(max_retries=2))
     
     def init_database(self):
         """База данных для отслеживания отправленных новостей"""
@@ -73,30 +77,42 @@ class NewsCollector:
             logger.error(f"Ошибка сохранения в БД: {e}")
     
     def parse_site(self, site_config):
-        """Парсинг конкретного сайта"""
+        """Парсинг конкретного сайта с защитой от ошибок"""
         try:
-            logger.info(f"Парсинг {site_config['url']}...")
+            logger.info(f"Парсинг {site_config['name']} - {site_config['url']}")
             
+            # Пробуем получить страницу с таймаутом 10 секунд
             response = self.session.get(
                 site_config['url'], 
-                timeout=15
+                timeout=10,
+                allow_redirects=True
             )
             response.encoding = 'utf-8'
+            response.raise_for_status()
             
             soup = BeautifulSoup(response.text, 'html.parser')
             news_list = site_config['parser'](soup)
             
-            logger.info(f"Сайт {site_config['name']}: найдено {len(news_list)} новостей")
+            logger.info(f"✅ {site_config['name']}: найдено {len(news_list)} новостей")
             return news_list
             
+        except requests.exceptions.ConnectTimeout:
+            logger.error(f"⏰ Таймаут подключения к {site_config['name']}")
+            return []
+        except requests.exceptions.ReadTimeout:
+            logger.error(f"⏰ Таймаут чтения от {site_config['name']}")
+            return []
+        except requests.exceptions.ConnectionError:
+            logger.error(f"🔌 Ошибка подключения к {site_config['name']}")
+            return []
         except Exception as e:
-            logger.error(f"Ошибка парсинга {site_config['name']}: {e}")
+            logger.error(f"❌ Ошибка парсинга {site_config['name']}: {e}")
             return []
     
     def get_article_image(self, url):
         """Получение главного изображения статьи"""
         try:
-            response = self.session.get(url, timeout=10)
+            response = self.session.get(url, timeout=5)
             soup = BeautifulSoup(response.text, 'html.parser')
             
             og_image = soup.find('meta', property='og:image')
@@ -108,225 +124,175 @@ class NewsCollector:
             return None
 
 # ============================================
-# ПАРСЕРЫ
+# ПАРСЕРЫ (упрощенные и надежные)
 # ============================================
 
 def parse_onliner(soup):
     """Парсер Onliner.by"""
     news = []
     try:
-        # Пробуем найти новости
-        articles = soup.find_all('div', class_='news-tidings__item')
-        
-        if not articles:
-            articles = soup.find_all('div', class_='b-teasers-news-item')
-        
-        if not articles:
-            # Пробуем найти прямые ссылки
-            links = soup.find_all('a', class_='news-tidings__link')
-            for link in links[:10]:
-                title = link.text.strip()
-                url = link.get('href')
-                if title and url and len(title) > 10:
-                    if url.startswith('/'):
-                        url = 'https://people.onliner.by' + url
-                    news.append({
-                        'title': title,
-                        'url': url,
-                        'site': 'Onliner'
-                    })
-            return news
-        
-        for article in articles[:10]:
-            title_elem = article.find('a', class_='news-tidings__link')
-            if not title_elem:
-                title_elem = article.find('a', class_='b-teasers-news-item__title')
+        # Ищем все возможные новости
+        for link in soup.find_all('a', href=True):
+            href = link.get('href', '')
+            text = link.text.strip()
             
-            if title_elem:
-                title = title_elem.text.strip()
-                url = title_elem.get('href')
-                
-                if url:
-                    if url.startswith('/'):
-                        url = 'https://people.onliner.by' + url
-                    elif not url.startswith('http'):
-                        url = 'https://people.onliner.by/' + url
+            # Проверяем, похоже ли на новость
+            if '/news/' in href and len(text) > 20:
+                if not text.startswith('http'):
+                    if href.startswith('/'):
+                        href = 'https://people.onliner.by' + href
+                    elif not href.startswith('http'):
+                        href = 'https://people.onliner.by/' + href
                     
-                    news.append({
-                        'title': title,
-                        'url': url,
-                        'site': 'Onliner'
-                    })
+                    # Проверяем, не дубликат ли
+                    if not any(n['url'] == href for n in news):
+                        news.append({
+                            'title': text,
+                            'url': href,
+                            'site': 'Onliner'
+                        })
+                        if len(news) >= 10:
+                            break
     except Exception as e:
         logger.error(f"Ошибка Onliner: {e}")
     
-    return news
+    return news[:10]
 
 def parse_tochka(soup):
     """Парсер Tochka.by"""
     news = []
     try:
-        articles = soup.find_all('div', class_='news-item')
-        
-        if not articles:
-            articles = soup.find_all('article', class_='post-card')
-        
-        for article in articles[:10]:
-            title_elem = article.find('a', class_='news-item__title')
-            if not title_elem:
-                title_elem = article.find('a', class_='post-card__title')
+        # Ищем все возможные ссылки на новости
+        for link in soup.find_all('a', href=True):
+            href = link.get('href', '')
+            text = link.text.strip()
             
-            if title_elem:
-                title = title_elem.text.strip()
-                url = title_elem.get('href')
+            if '/news/' in href and len(text) > 15:
+                if href.startswith('/'):
+                    href = 'https://tochka.by' + href
+                elif not href.startswith('http'):
+                    href = 'https://tochka.by/' + href
                 
-                if url:
-                    if url.startswith('/'):
-                        url = 'https://tochka.by' + url
-                    elif not url.startswith('http'):
-                        url = 'https://tochka.by/' + url
-                    
+                if not any(n['url'] == href for n in news):
                     news.append({
-                        'title': title,
-                        'url': url,
+                        'title': text,
+                        'url': href,
                         'site': 'Tochka.by'
                     })
+                    if len(news) >= 10:
+                        break
     except Exception as e:
         logger.error(f"Ошибка Tochka: {e}")
     
-    return news
+    return news[:10]
 
 def parse_sb(soup):
     """Парсер SB.by"""
     news = []
     try:
-        articles = soup.find_all('div', class_='news-item')
-        
-        for article in articles[:10]:
-            title_elem = article.find('a', class_='news-item__title')
+        for link in soup.find_all('a', href=True):
+            href = link.get('href', '')
+            text = link.text.strip()
             
-            if title_elem:
-                title = title_elem.text.strip()
-                url = title_elem.get('href')
+            if '/news/' in href and len(text) > 15:
+                if href.startswith('/'):
+                    href = 'https://www.sb.by' + href
+                elif not href.startswith('http'):
+                    href = 'https://www.sb.by/' + href
                 
-                if url:
-                    if url.startswith('/'):
-                        url = 'https://www.sb.by' + url
-                    elif not url.startswith('http'):
-                        url = 'https://www.sb.by/' + url
-                    
+                if not any(n['url'] == href for n in news):
                     news.append({
-                        'title': title,
-                        'url': url,
+                        'title': text,
+                        'url': href,
                         'site': 'SB.by'
                     })
+                    if len(news) >= 10:
+                        break
     except Exception as e:
         logger.error(f"Ошибка SB: {e}")
     
-    return news
+    return news[:10]
 
 def parse_minsknews(soup):
     """Парсер Minsknews.by"""
     news = []
     try:
-        articles = soup.find_all('div', class_='news-item')
-        
-        if not articles:
-            articles = soup.find_all('article', class_='post')
-        
-        for article in articles[:10]:
-            title_elem = article.find('a', class_='news-item__title')
-            if not title_elem:
-                title_elem = article.find('a', class_='post-title')
+        for link in soup.find_all('a', href=True):
+            href = link.get('href', '')
+            text = link.text.strip()
             
-            if title_elem:
-                title = title_elem.text.strip()
-                url = title_elem.get('href')
+            if len(text) > 20 and not 'minsknews.by' in href:
+                if href.startswith('/'):
+                    href = 'https://minsknews.by' + href
+                elif not href.startswith('http'):
+                    href = 'https://minsknews.by/' + href
                 
-                if url:
-                    if url.startswith('/'):
-                        url = 'https://minsknews.by' + url
-                    elif not url.startswith('http'):
-                        url = 'https://minsknews.by/' + url
-                    
+                if not any(n['url'] == href for n in news):
                     news.append({
-                        'title': title,
-                        'url': url,
+                        'title': text,
+                        'url': href,
                         'site': 'Minsknews.by'
                     })
+                    if len(news) >= 10:
+                        break
     except Exception as e:
         logger.error(f"Ошибка Minsknews: {e}")
     
-    return news
+    return news[:10]
 
 def parse_times(soup):
     """Парсер Times.by"""
     news = []
     try:
-        articles = soup.find_all('div', class_='post')
-        
-        if not articles:
-            articles = soup.find_all('article', class_='news-item')
-        
-        for article in articles[:10]:
-            title_elem = article.find('a', class_='post-title')
-            if not title_elem:
-                title_elem = article.find('h2')
-                if title_elem:
-                    title_elem = title_elem.find('a')
+        for link in soup.find_all('a', href=True):
+            href = link.get('href', '')
+            text = link.text.strip()
             
-            if title_elem:
-                title = title_elem.text.strip()
-                url = title_elem.get('href')
+            if len(text) > 20:
+                if href.startswith('/'):
+                    href = 'https://times.by' + href
+                elif not href.startswith('http'):
+                    href = 'https://times.by/' + href
                 
-                if url:
-                    if url.startswith('/'):
-                        url = 'https://times.by' + url
-                    elif not url.startswith('http'):
-                        url = 'https://times.by/' + url
-                    
+                if not any(n['url'] == href for n in news):
                     news.append({
-                        'title': title,
-                        'url': url,
+                        'title': text,
+                        'url': href,
                         'site': 'Times.by'
                     })
+                    if len(news) >= 10:
+                        break
     except Exception as e:
         logger.error(f"Ошибка Times: {e}")
     
-    return news
+    return news[:10]
 
 def parse_mlyn(soup):
     """Парсер Mlyn.by"""
     news = []
     try:
-        articles = soup.find_all('div', class_='news-item')
-        
-        for article in articles[:10]:
-            title_elem = article.find('a', class_='news-title')
-            if not title_elem:
-                title_elem = article.find('h3')
-                if title_elem:
-                    title_elem = title_elem.find('a')
+        for link in soup.find_all('a', href=True):
+            href = link.get('href', '')
+            text = link.text.strip()
             
-            if title_elem:
-                title = title_elem.text.strip()
-                url = title_elem.get('href')
+            if len(text) > 20:
+                if href.startswith('/'):
+                    href = 'https://mlyn.by' + href
+                elif not href.startswith('http'):
+                    href = 'https://mlyn.by/' + href
                 
-                if url:
-                    if url.startswith('/'):
-                        url = 'https://mlyn.by' + url
-                    elif not url.startswith('http'):
-                        url = 'https://mlyn.by/' + url
-                    
+                if not any(n['url'] == href for n in news):
                     news.append({
-                        'title': title,
-                        'url': url,
+                        'title': text,
+                        'url': href,
                         'site': 'Mlyn.by'
                     })
+                    if len(news) >= 10:
+                        break
     except Exception as e:
         logger.error(f"Ошибка Mlyn: {e}")
     
-    return news
+    return news[:10]
 
 # ============================================
 # КОНФИГУРАЦИЯ
@@ -407,9 +373,10 @@ class NewsBot:
         
         if not news_list:
             await query.edit_message_text(
-                f"❌ Не удалось получить новости с {site['name']}",
+                f"❌ Не удалось получить новости с {site['name']}\n"
+                f"Возможно сайт временно недоступен",
                 reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("◀️ Назад", callback_data="back")
+                    InlineKeyboardButton("◀️ В меню", callback_data="menu")
                 ]])
             )
             return
@@ -424,7 +391,7 @@ class NewsBot:
             await query.edit_message_text(
                 f"📭 Нет новых новостей с {site['name']}",
                 reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("◀️ Назад", callback_data="back")
+                    InlineKeyboardButton("◀️ В меню", callback_data="menu")
                 ]])
             )
             return
@@ -468,56 +435,61 @@ class NewsBot:
     
     async def publish_all(self, query, context):
         """Публикация со всех сайтов"""
-        await query.edit_message_text("🔍 Собираю новости со всех сайтов...")
+        await query.edit_message_text("🔍 Собираю новости со всех сайтов...\nЭто может занять до 2 минут")
         
         total = 0
         results = []
         
         for site in SITES:
-            news_list = self.collector.parse_site(site)
-            
-            if not news_list:
-                results.append(f"❌ {site['name']}: 0")
-                continue
-            
-            new_news = []
-            for news in news_list:
-                if not self.collector.is_news_sent(news['url']):
-                    new_news.append(news)
-            
-            if not new_news:
-                results.append(f"📭 {site['name']}: нет новых")
-                continue
-            
-            site_published = 0
-            for news in new_news:
-                try:
-                    image_url = self.collector.get_article_image(news['url'])
-                    text = f"*{news['title']}*\n\n[🔗 Читать на {news['site']}]({news['url']})"
-                    
-                    if image_url:
-                        await context.bot.send_photo(
-                            chat_id=self.channel_id,
-                            photo=image_url,
-                            caption=text,
-                            parse_mode='Markdown'
-                        )
-                    else:
-                        await context.bot.send_message(
-                            chat_id=self.channel_id,
-                            text=text,
-                            parse_mode='Markdown'
-                        )
-                    
-                    self.collector.mark_news_sent(news['url'], news['title'], news['site'])
-                    site_published += 1
-                    await asyncio.sleep(2)
-                    
-                except Exception as e:
-                    logger.error(f"Ошибка: {e}")
-            
-            results.append(f"✅ {site['name']}: {site_published}")
-            total += site_published
+            try:
+                news_list = self.collector.parse_site(site)
+                
+                if not news_list:
+                    results.append(f"❌ {site['name']}: ошибка")
+                    continue
+                
+                new_news = []
+                for news in news_list:
+                    if not self.collector.is_news_sent(news['url']):
+                        new_news.append(news)
+                
+                if not new_news:
+                    results.append(f"📭 {site['name']}: нет новых")
+                    continue
+                
+                site_published = 0
+                for news in new_news:
+                    try:
+                        image_url = self.collector.get_article_image(news['url'])
+                        text = f"*{news['title']}*\n\n[🔗 Читать на {news['site']}]({news['url']})"
+                        
+                        if image_url:
+                            await context.bot.send_photo(
+                                chat_id=self.channel_id,
+                                photo=image_url,
+                                caption=text,
+                                parse_mode='Markdown'
+                            )
+                        else:
+                            await context.bot.send_message(
+                                chat_id=self.channel_id,
+                                text=text,
+                                parse_mode='Markdown'
+                            )
+                        
+                        self.collector.mark_news_sent(news['url'], news['title'], news['site'])
+                        site_published += 1
+                        await asyncio.sleep(2)
+                        
+                    except Exception as e:
+                        logger.error(f"Ошибка: {e}")
+                
+                results.append(f"✅ {site['name']}: {site_published}")
+                total += site_published
+                
+            except Exception as e:
+                logger.error(f"Ошибка при обработке {site['name']}: {e}")
+                results.append(f"❌ {site['name']}: ошибка")
         
         report = "📊 *Результаты*\n\n" + "\n".join(results) + f"\n\n✅ *Всего: {total}*"
         
@@ -529,16 +501,19 @@ class NewsBot:
             ]])
         )
     
-    async def back_to_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Возврат в меню"""
-        query = update.callback_query
-        await query.answer()
-        await self.start_command(update, context)
-    
     def run(self):
         """Запуск бота"""
         logger.info("🚀 Бот запускается...")
-        self.application.run_polling()
+        
+        # Создаем новый event loop для Python 3.14
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self.application.run_polling()
+        except RuntimeError as e:
+            logger.error(f"Ошибка event loop: {e}")
+            # Пробуем альтернативный способ
+            asyncio.run(self.application.run_polling())
 
 # ============================================
 # ЗАПУСК
@@ -555,6 +530,8 @@ def main():
     try:
         bot = NewsBot(BOT_TOKEN, CHANNEL_ID)
         bot.run()
+    except KeyboardInterrupt:
+        logger.info("🛑 Бот остановлен")
     except Exception as e:
         logger.error(f"❌ Критическая ошибка: {e}")
         sys.exit(1)
