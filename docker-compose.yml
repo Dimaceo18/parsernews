@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  # Сервис для конвертации Telegram в RSS
+  telegram-to-rss:
+    image: aigoncharov/telegram-to-rss:latest
+    container_name: tg-to-rss
+    restart: always
+    environment:
+      - TG_API_ID=${TG_API_ID}
+      - TG_API_HASH=${TG_API_HASH}
+      - TG_PASSWORD=${TG_PASSWORD}
+      - BASE_URL=http://tg-to-rss:3042
+      - UPDATE_INTERVAL=300  # Проверка каждые 5 минут
+      - FEED_SIZE=100
+    ports:
+      - "3042:3042"
+    volumes:
+      - tg_data:/data
+    networks:
+      - bot_network
+
+  # Ваш бот для пересылки в Telegram канал
+  rss-bot:
+    build: .
+    container_name: rss-forward-bot
+    restart: always
+    environment:
+      - TELEGRAM_BOT_TOKEN=${BOT_TOKEN}
+      - TELEGRAM_CHANNEL_ID=${CHANNEL_ID}
+      - RSS_SERVER=http://tg-to-rss:3042
+    volumes:
+      - bot_data:/data
+    depends_on:
+      - telegram-to-rss
+    networks:
+      - bot_network
+
+volumes:
+  tg_data:
+  bot_data:
+
+networks:
+  bot_network:
+    driver: bridge
