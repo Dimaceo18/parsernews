@@ -6,7 +6,6 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
-from telegram.ext import Updater  # Явно импортируем
 import os
 import sys
 import warnings
@@ -435,17 +434,13 @@ SITES = [
 # TELEGRAM БОТ
 # ============================================
 
-# ============================================
-# TELEGRAM БОТ (ИСПРАВЛЕННАЯ ВЕРСИЯ)
-# ============================================
-
 class NewsBot:
     def __init__(self, token, channel_id):
         self.token = token
         self.channel_id = channel_id
         self.collector = NewsCollector()
         
-        # Простое создание Application (без лишних параметров)
+        # Простое создание Application
         self.application = Application.builder().token(token).build()
         
         # Настройка handlers
@@ -730,7 +725,7 @@ class NewsBot:
 def main():
     # Берем токен из переменных окружения
     BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
-    CHANNEL_ID = os.environ.get('TELEGRAM_CHANNEL_ID', '@your_channel')
+    CHANNEL_ID = os.environ.get('TELEGRAM_CHANNEL_ID', '@parseranews')
     
     if not BOT_TOKEN:
         logger.error("❌ TELEGRAM_BOT_TOKEN не найден в переменных окружения")
